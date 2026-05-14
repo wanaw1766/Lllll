@@ -3,7 +3,7 @@ from configparser import ConfigParser
 from threading import active_count
 from time import sleep as swait
 from os import system, name
-from telegram import Api
+from tg_api import Api   # Changed from telegram import Api
 from re import search
 from sys import exit
 
