@@ -3,40 +3,62 @@ import asyncio
 import random
 from re import search
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+# Import the python-telegram-bot library with an alias (so it doesn't conflict with your local telegram.py)
+import telegram as tg
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
+# Your local modules (telegram.py stays as is)
 from utilitys import config_loader, LOGO
 from auto_proxy import Proxy
-from tg_api import Api
+from telegram import Api   # this is YOUR telegram.py, not the library
 
 stop_flag = False
-# Global variables to track progress (for /status)
 current_status = {
-    'mode': None,
-    'channel': None,
-    'post': None,
-    'target': 0,
-    'sent': 0,
-    'real_views': 0,
-    'active': False
+    'mode': None, 'channel': None, 'post': None,
+    'target': 0, 'sent': 0, 'real_views': 0, 'active': False
 }
+progress_msg_id = None
 
-# -------------------------------------------------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+def progress_bar(current, total, length=20):
+    filled = int(length * current / total)
+    return '█' * filled + '░' * (length - filled)
+
+async def update_progress_message(context, chat_id, sent, target, real_views, mode):
+    global progress_msg_id
+    bar = progress_bar(sent, target)
+    percentage = (sent / target) * 100 if target > 0 else 0
+    text = (
+        f"🚀 *{mode.upper()} MODE*\n"
+        f"📊 Progress:\n`{bar}` {percentage:.1f}%\n"
+        f"✅ Sent: `{sent}` / `{target}` views\n"
+        f"👁️ Live Telegram views: `{real_views}`\n"
+        f"⚡ Status: {'Running...' if not stop_flag else 'Stopping...'}"
+    )
+    if progress_msg_id is None:
+        msg = await context.bot.send_message(chat_id, text, parse_mode='Markdown')
+        progress_msg_id = msg.message_id
+    else:
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=progress_msg_id,
+            text=text,
+            parse_mode='Markdown'
+        )
+
+async def start(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [InlineKeyboardButton("🎯 Direct View", callback_data="direct")],
-        [InlineKeyboardButton("⏱️ Random Mode", callback_data="random")],
-        [InlineKeyboardButton("🛑 Stop", callback_data="stop")],
-        [InlineKeyboardButton("📊 Status", callback_data="status")]
+        [tg.InlineKeyboardButton("🎯 Direct View", callback_data="direct")],
+        [tg.InlineKeyboardButton("⏱️ Random Mode", callback_data="random")],
+        [tg.InlineKeyboardButton("🛑 Stop", callback_data="stop")],
+        [tg.InlineKeyboardButton("📊 Status", callback_data="status")]
     ]
     await update.message.reply_text(
         "📢 *Telegram Auto Views Bot*\nChoose an option:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=tg.InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_handler(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -56,23 +78,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "status":
         await send_status(update, context)
 
-async def send_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send current progress and live views."""
+async def send_status(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     if current_status['active']:
         msg = (
             f"📊 *Status*\n"
             f"Mode: `{current_status['mode']}`\n"
             f"Target: `{current_status['channel']}/{current_status['post']}`\n"
-            f"Views sent: `{current_status['sent']} / {current_status['target']}`\n"
-            f"Real Telegram views: `{current_status['real_views']}`\n"
+            f"Sent: `{current_status['sent']} / {current_status['target']}`\n"
+            f"Real views: `{current_status['real_views']}`\n"
             f"Active: ✅"
         )
     else:
         msg = "No active view task. Use /start to begin."
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Step 1: waiting for URL
+async def handle_message(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+    global progress_msg_id
     if context.user_data.get('waiting_for_url'):
         url = update.message.text
         match = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', url)
@@ -87,7 +108,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ URL accepted. Now send the **number of views** (e.g., `100`):")
         return
 
-    # Step 2: waiting for view count
     if context.user_data.get('waiting_for_count'):
         try:
             view_count = int(update.message.text.strip())
@@ -103,38 +123,40 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         channel = context.user_data['channel']
         post = context.user_data['post']
         mode = context.user_data['mode']
+        target = view_count
+
+        progress_msg_id = None
 
         await update.message.reply_text(
             f"🚀 Starting {mode} mode for `{channel}/{post}`.\n"
-            f"Target views: **{view_count}**.\n"
-            f"Use /stop to cancel or /status to see progress."
+            f"Target views: **{target}**.\n"
+            f"Progress will be shown in real time.\nUse /stop to cancel."
         )
-        # Start two background tasks: view sender and real views updater
-        asyncio.create_task(run_viewer(update, context, channel, post, view_count, mode))
+
+        asyncio.create_task(run_viewer(update, context, channel, post, target, mode))
         asyncio.create_task(update_real_views(update, context, channel, post))
 
-async def update_real_views(update: Update, context: ContextTypes.DEFAULT_TYPE, channel, post):
-    """Periodically fetch real views from Telegram and update global status."""
+async def update_real_views(update: tg.Update, context: ContextTypes.DEFAULT_TYPE, channel, post):
     api = Api(channel=channel, post=post)
     while current_status['active'] and not stop_flag:
         try:
-            Api.views(api)  # updates Api.real_views
+            Api.views(api)
             current_status['real_views'] = Api.real_views
-        except Exception as e:
+            await update_progress_message(
+                context, update.effective_chat.id,
+                current_status['sent'], current_status['target'],
+                current_status['real_views'], current_status['mode']
+            )
+        except Exception:
             pass
-        await asyncio.sleep(5)  # update every 5 seconds
+        await asyncio.sleep(3)
 
-async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel, post, view_count, mode):
+async def run_viewer(update: tg.Update, context: ContextTypes.DEFAULT_TYPE, channel, post, target, mode):
     global stop_flag, current_status
     stop_flag = False
     current_status = {
-        'mode': mode,
-        'channel': channel,
-        'post': post,
-        'target': view_count,
-        'sent': 0,
-        'real_views': 0,
-        'active': True
+        'mode': mode, 'channel': channel, 'post': post,
+        'target': target, 'sent': 0, 'real_views': 0, 'active': True
     }
 
     http, socks4, socks5 = config_loader()
@@ -149,51 +171,55 @@ async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel
         return
 
     views_sent = 0
-    last_progress_msg = 0
+    chat_id = update.effective_chat.id
 
     if mode == 'direct':
-        while views_sent < view_count and not stop_flag:
+        while views_sent < target and not stop_flag:
             for proxy_type, proxy in proxy_list:
-                if views_sent >= view_count or stop_flag:
+                if views_sent >= target or stop_flag:
                     break
                 api.send_view(proxy, proxy_type)
                 views_sent += 1
                 current_status['sent'] = views_sent
-                # Send progress every 10 views or every 2 seconds (approx)
-                if views_sent - last_progress_msg >= 10:
-                    await update.message.reply_text(f"📈 Progress: {views_sent} / {view_count} views sent.")
-                    last_progress_msg = views_sent
-                await asyncio.sleep(0.2)  # small delay to avoid flooding
-        await update.message.reply_text(f"✅ Direct mode finished. Sent {views_sent} / {view_count} views.")
+                if views_sent % 5 == 0 or views_sent == target:
+                    await update_progress_message(
+                        context, chat_id, views_sent, target,
+                        current_status['real_views'], mode
+                    )
+                await asyncio.sleep(0.1)
+        await update_progress_message(context, chat_id, views_sent, target, current_status['real_views'], mode)
+        await context.bot.send_message(chat_id, f"✅ Direct mode finished. Sent {views_sent} / {target} views.")
 
     elif mode == 'random':
-        while views_sent < view_count and not stop_flag:
+        while views_sent < target and not stop_flag:
             proxy_type, proxy = proxy_list[0]
             api.send_view(proxy, proxy_type)
             views_sent += 1
             current_status['sent'] = views_sent
-            if views_sent % 5 == 0:  # progress every 5 views
-                await update.message.reply_text(f"📈 Random mode progress: {views_sent} / {view_count} views sent.")
-            if views_sent < view_count:
+            await update_progress_message(context, chat_id, views_sent, target, current_status['real_views'], mode)
+            if views_sent < target:
                 wait_seconds = random.randint(60, 300)
-                await asyncio.sleep(wait_seconds)
-        await update.message.reply_text(f"✅ Random mode finished. Sent {views_sent} / {view_count} views.")
+                for _ in range(wait_seconds // 5):
+                    if stop_flag:
+                        break
+                    await asyncio.sleep(5)
+                    await update_progress_message(context, chat_id, views_sent, target, current_status['real_views'], mode)
+        await context.bot.send_message(chat_id, f"✅ Random mode finished. Sent {views_sent} / {target} views.")
 
     current_status['active'] = False
 
-async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def stop(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     global stop_flag
     stop_flag = True
     await update.message.reply_text("🛑 Stopping view tasks...")
 
-async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Cancelled.")
 
-async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def status(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     await send_status(update, context)
 
-# -------------------------------------------------------------------
 def main():
     print(LOGO)
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
