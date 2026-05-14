@@ -22,7 +22,7 @@ lock = threading.Lock()
 progress_msg_id = None
 chat_id = None
 app_context = None
-main_loop = None   # will hold the asyncio event loop from the main thread
+main_loop = None
 
 def progress_bar(current, total, length=20):
     filled = int(length * current / total) if total else 0
@@ -51,8 +51,6 @@ async def update_progress():
             pass
 
 def safe_update_progress():
-    """Call this from any thread to update the progress message."""
-    global main_loop
     if main_loop is not None and main_loop.is_running():
         asyncio.run_coroutine_threadsafe(update_progress(), main_loop)
 
@@ -87,6 +85,8 @@ def send_view_with_count(api, proxy, proxy_type):
     api.send_view(proxy, proxy_type)
     with lock:
         sent_views += 1
+        if sent_views >= target_views:
+            stop_flag = True
         if sent_views % 10 == 0 or sent_views == target_views:
             safe_update_progress()
 
@@ -102,6 +102,8 @@ def start_sender(api, auto_proxies):
     while not stop_flag and sent_views < target_views:
         threads = []
         for proxy_type, proxy in proxy_list:
+            if stop_flag or sent_views >= target_views:
+                break
             while active_count() > THREADS:
                 if stop_flag or sent_views >= target_views:
                     break
@@ -122,7 +124,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     app_context = context
     progress_msg_id = None
-    main_loop = asyncio.get_running_loop()   # capture the event loop
+    main_loop = asyncio.get_running_loop()
     keyboard = [[InlineKeyboardButton("🎯 Start Viewing", callback_data="start")],
                 [InlineKeyboardButton("🛑 Stop", callback_data="stop")]]
     await update.message.reply_text("📢 *Telegram Auto Views Bot*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
