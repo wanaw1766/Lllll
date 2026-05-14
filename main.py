@@ -3,12 +3,14 @@ import asyncio
 import random
 from re import search
 
+# Telegram bot library (installed package)
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
+# Your local modules (telegram.py renamed to tg_api.py)
 from utilitys import config_loader, LOGO
 from auto_proxy import Proxy
-from telegram import Api
+from tg_api import Api   # Note: tg_api not telegram
 
 stop_flag = False
 
@@ -83,7 +85,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         asyncio.create_task(run_viewer(update, context, channel, post, view_count, mode))
 
-async def run_viewer(update, context, channel, post, view_count, mode):
+async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel, post, view_count, mode):
     global stop_flag
     stop_flag = False
 
@@ -115,7 +117,7 @@ async def run_viewer(update, context, channel, post, view_count, mode):
             api.send_view(proxy, proxy_type)
             views_sent += 1
             if views_sent < view_count:
-                wait_seconds = random.randint(60, 300)
+                wait_seconds = random.randint(60, 300)  # 1-5 minutes
                 await asyncio.sleep(wait_seconds)
         await update.message.reply_text(f"✅ Random mode finished. Sent {views_sent} / {view_count} views.")
 
@@ -133,14 +135,14 @@ def main():
     print(LOGO)
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
-        raise ValueError("No TELEGRAM_BOT_TOKEN set.")
+        raise ValueError("No TELEGRAM_BOT_TOKEN set in environment variables.")
     app = Application.builder().token(token).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("stop", stop))
     app.add_handler(CommandHandler("cancel", cancel))
     app.add_handler(CallbackQueryHandler(button_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-    print("🤖 Bot running...")
+    print("🤖 Bot is running. Press Ctrl+C to stop.")
     app.run_polling()
 
 if __name__ == "__main__":
