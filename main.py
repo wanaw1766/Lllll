@@ -2,52 +2,42 @@ import os
 import sys
 import threading
 import time
-import asyncio
 from re import search
+from threading import active_count
+from time import sleep as swait
 
-# ---------- HACK: temporarily remove current dir to import real telegram library ----------
+# ---------- HACK: import the real telegram library (avoid conflict with your local telegram.py) ----------
 original_path = sys.path.copy()
 sys.path = [p for p in sys.path if p != '' and p != os.getcwd() and not p.endswith('/.')]
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 sys.path = original_path
-# ----------------------------------------------------------------------------------------
+# -------------------------------------------------------------------------------------------------------
 
-# Your local modules (they will find your local telegram.py because path is restored)
-from utilitys import config_loader, LOGO, logger
+# Your local modules (they will find your local telegram.py)
+from utilitys import config_loader, LOGO, logger, THREADS
 from auto_proxy import Proxy
-from telegram import Api   # your local telegram.py
+from telegram import Api   # your original telegram.py
 
 # ---------- Global flags ----------
 stop_flag = False
 target_views = 0
 sent_views = 0
 real_views = 0
-loop = None          # asyncio event loop for sending messages from threads
+lock = threading.Lock()   # to safely update sent_views across threads
 
-def safe_send_message(context, chat_id, text):
-    """Send a Telegram message from a background thread safely."""
-    global loop
-    if loop is not None and loop.is_running():
-        asyncio.run_coroutine_threadsafe(
-            context.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown'),
-            loop
-        )
-
-# ---------- Original view updater (real views) ----------
-def view_updater(api, chat_id, context):
+# ---------- Original CLI view updater (real views) ----------
+def view_updater(api):
     global real_views, stop_flag
     while not stop_flag:
         try:
             Api.views(api)
             real_views = Api.real_views
-            # Send progress update every 5 seconds
-            safe_send_message(context, chat_id, f"📈 *Progress*\nSent: {sent_views}/{target_views}\nLive views: {real_views}")
         except Exception as e:
             logger(e)
-        time.sleep(5)
+        swait(2)
 
-# ---------- Original CLI display (prints to console logs) ----------
+# ---------- Original CLI display (prints to console) ----------
 def cli():
     from utilitys import display
     _display = display()
@@ -55,38 +45,60 @@ def cli():
         try:
             print("\n" * 2)
             _display()
+            print(f"Target: {sent_views}/{target_views} | Stop flag: {stop_flag}")
         except Exception as e:
             logger(e)
-        time.sleep(2)
+        swait(2)
 
-# ---------- View sender (exactly like your CLI, but stops at target) ----------
-def send_views(api, auto_proxies, chat_id, context):
-    global sent_views, stop_flag, target_views
+# ---------- Send view with counting (used by each thread) ----------
+def send_view_with_count(api, proxy, proxy_type):
+    global sent_views, stop_flag, target_views, lock
+    with lock:
+        if sent_views >= target_views or stop_flag:
+            return
+    # Call original send_view
+    api.send_view(proxy, proxy_type)
+    with lock:
+        sent_views += 1
+
+# ---------- Original START function (thread per proxy) with target limit ----------
+def start(api, auto_proxies, chat_id, context):
+    global sent_views, stop_flag, target_views, lock
     auto_proxies.init()
     proxy_list = list(auto_proxies.proxies)
     if not proxy_list:
-        safe_send_message(context, chat_id, "❌ No proxies available. Stopping.")
+        print("No proxies available.")
         return
 
-    proxy_index = 0
-    total = len(proxy_list)
-    safe_send_message(context, chat_id, f"🚀 Started sending views. Target: {target_views}")
+    threads = []
+    for proxy_type, proxy in proxy_list:
+        while active_count() > THREADS:
+            if stop_flag:
+                break
+            swait(0.05)
+        if stop_flag:
+            break
+        # Create a thread that calls send_view_with_count
+        thread = threading.Thread(
+            target=send_view_with_count,
+            args=(api, proxy, proxy_type),
+            daemon=True
+        )
+        threads.append(thread)
+        thread.start()
 
-    while not stop_flag and sent_views < target_views:
-        proxy_type, proxy = proxy_list[proxy_index % total]
-        try:
-            api.send_view(proxy, proxy_type)
-            sent_views += 1
-            proxy_index += 1
-            # Same delay as your original CLI (0.05 seconds)
-            time.sleep(0.05)
-        except Exception:
-            proxy_index += 1
-            continue
+    # Wait for all threads to finish (they exit when target reached)
+    for t in threads:
+        t.join()
 
-    safe_send_message(context, chat_id, f"✅ Finished. Sent {sent_views}/{target_views} views.")
-    global stop_flag
-    stop_flag = True
+    print(f"View sender finished. Sent {sent_views}/{target_views} views.")
+    # Send final message to Telegram (if chat_id provided)
+    if chat_id and context:
+        import asyncio
+        asyncio.run_coroutine_threadsafe(
+            context.bot.send_message(chat_id=chat_id, text=f"✅ Finished. Sent {sent_views}/{target_views} views."),
+            asyncio.get_event_loop()
+        )
 
 # ---------- Telegram bot handlers ----------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -114,7 +126,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 Stopping...")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global target_views, sent_views, stop_flag, loop
+    global target_views, sent_views, stop_flag
     if context.user_data.get('waiting_for_url'):
         url = update.message.text
         match = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', url)
@@ -146,7 +158,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         channel = context.user_data['channel']
         post = context.user_data['post']
 
-        # Load config and create objects (same as original CLI)
+        # Load config and create objects exactly as original CLI
         http, socks4, socks5 = config_loader()
         auto_proxies = Proxy(http_sources=http, socks4_sources=socks4, socks5_sources=socks5)
         api = Api(channel=channel, post=post)
@@ -154,16 +166,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"🚀 Starting view sender for `{channel}/{post}`.\n"
             f"Target: **{target_views}** views.\n"
-            f"Progress will be sent every 5 seconds.\nUse /stop to cancel."
+            f"Using **{THREADS}** concurrent threads.\nUse /stop to cancel."
         )
 
         chat_id = update.effective_chat.id
-        loop = asyncio.get_running_loop()
 
-        # Start background threads
-        threading.Thread(target=send_views, args=(api, auto_proxies, chat_id, context), daemon=True).start()
-        threading.Thread(target=view_updater, args=(api, chat_id, context), daemon=True).start()
+        # Start the original CLI threads
+        threading.Thread(target=view_updater, args=(api,), daemon=True).start()
         threading.Thread(target=cli, daemon=True).start()
+        # Start the thread-per-proxy sender
+        threading.Thread(target=start, args=(api, auto_proxies, chat_id, context), daemon=True).start()
 
 async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global stop_flag
