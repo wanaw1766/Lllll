@@ -22,6 +22,7 @@ lock = threading.Lock()
 progress_msg_id = None
 chat_id = None
 app_context = None
+main_loop = None   # will hold the asyncio event loop from the main thread
 
 def progress_bar(current, total, length=20):
     filled = int(length * current / total) if total else 0
@@ -49,13 +50,19 @@ async def update_progress():
         except Exception:
             pass
 
+def safe_update_progress():
+    """Call this from any thread to update the progress message."""
+    global main_loop
+    if main_loop is not None and main_loop.is_running():
+        asyncio.run_coroutine_threadsafe(update_progress(), main_loop)
+
 def view_updater(api):
     global real_views, stop_flag
     while not stop_flag:
         try:
             Api.views(api)
             real_views = Api.real_views
-            asyncio.run_coroutine_threadsafe(update_progress(), asyncio.get_event_loop())
+            safe_update_progress()
         except Exception:
             pass
         swait(5)
@@ -81,7 +88,7 @@ def send_view_with_count(api, proxy, proxy_type):
     with lock:
         sent_views += 1
         if sent_views % 10 == 0 or sent_views == target_views:
-            asyncio.run_coroutine_threadsafe(update_progress(), asyncio.get_event_loop())
+            safe_update_progress()
 
 def start_sender(api, auto_proxies):
     global sent_views, stop_flag, target_views
@@ -107,15 +114,15 @@ def start_sender(api, auto_proxies):
         for t in threads:
             t.join()
         print(f"Completed one proxy cycle. Total sent: {sent_views}/{target_views}")
-
     print(f"Sender finished. Sent {sent_views} views.")
 
 # ---------------- Bot handlers ----------------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global chat_id, app_context, progress_msg_id
+    global chat_id, app_context, progress_msg_id, main_loop
     chat_id = update.effective_chat.id
     app_context = context
     progress_msg_id = None
+    main_loop = asyncio.get_running_loop()   # capture the event loop
     keyboard = [[InlineKeyboardButton("🎯 Start Viewing", callback_data="start")],
                 [InlineKeyboardButton("🛑 Stop", callback_data="stop")]]
     await update.message.reply_text("📢 *Telegram Auto Views Bot*", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
