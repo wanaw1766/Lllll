@@ -1,5 +1,4 @@
 import os
-import sys
 import threading
 import time
 import asyncio
@@ -7,37 +6,15 @@ from re import search
 from threading import active_count
 from time import sleep as swait
 
-# ------------------------------------------------------------
-# TRICK: Force Python to load your local telegram.py as the 'telegram' module
-# before any other imports. This ensures that 'from telegram import Api' works.
-# ------------------------------------------------------------
-import importlib.util
-
-# Load your local telegram.py
-local_telegram_path = os.path.join(os.path.dirname(__file__), 'telegram.py')
-spec = importlib.util.spec_from_file_location("telegram", local_telegram_path)
-local_telegram = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(local_telegram)
-
-# Replace the 'telegram' module in sys.modules with your local version
-sys.modules['telegram'] = local_telegram
-
-# Now import the REAL python-telegram-bot library using a different name
-# We need to temporarily remove the current directory to avoid loading your local file again
-original_path = sys.path.copy()
-sys.path = [p for p in sys.path if p != '' and p != os.getcwd() and not p.endswith('/.')]
-import telegram as tg_lib
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+# Real telegram library (no conflict because your local file is now tg_views.py)
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-sys.path = original_path
-# ------------------------------------------------------------
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# Now import your other local modules (they will use the local 'telegram' module because we replaced it)
+# Your local modules (now using tg_views)
 from utilitys import config_loader, LOGO, logger, THREADS
 from auto_proxy import Proxy
-from telegram import Api   # This now comes from your local telegram.py
+from tg_views import Api   # <-- your renamed file
 
-# ------------------------------------------------------------
 # Global state
 stop_flag = False
 target_views = 0
@@ -108,7 +85,6 @@ def start(api, auto_proxies, chat_id, context):
             asyncio.get_event_loop()
         )
 
-# ------------------------------------------------------------
 # Bot handlers
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
