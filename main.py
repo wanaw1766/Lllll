@@ -44,7 +44,7 @@ async def update_progress_message(context, chat_id, sent, target, real_views, mo
                 parse_mode='Markdown'
             )
         except Exception:
-            pass  # Ignore "message not modified" errors
+            pass  # ignore "Message not modified" errors
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
@@ -160,6 +160,7 @@ async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel
         'target': target, 'sent': 0, 'real_views': 0, 'active': True
     }
 
+    # Load config and proxies exactly as original CLI did
     http, socks4, socks5 = config_loader()
     auto_proxies = Proxy(http_sources=http, socks4_sources=socks4, socks5_sources=socks5)
     auto_proxies.init()
@@ -177,6 +178,7 @@ async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel
     total_proxies = len(proxy_list)
 
     if mode == 'direct':
+        # Send views as fast as original CLI (with small delay to be safe)
         while views_sent < target and not stop_flag:
             proxy_type, proxy = proxy_list[proxy_index % total_proxies]
             try:
@@ -189,8 +191,9 @@ async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel
                         current_status['real_views'], mode
                     )
                 proxy_index += 1
-                await asyncio.sleep(0.05)
-            except Exception:
+                await asyncio.sleep(0.15)  # Same delay as original CLI
+            except Exception as e:
+                print(f"Error sending view: {e}")
                 proxy_index += 1
                 continue
         await update_progress_message(context, chat_id, views_sent, target, current_status['real_views'], mode)
@@ -206,7 +209,10 @@ async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel
                 await update_progress_message(context, chat_id, views_sent, target, current_status['real_views'], mode)
                 if views_sent < target:
                     wait_seconds = random.randint(60, 300)
-                    await asyncio.sleep(wait_seconds)
+                    for _ in range(wait_seconds):
+                        if stop_flag:
+                            break
+                        await asyncio.sleep(1)
             except Exception:
                 await asyncio.sleep(1)
                 continue
