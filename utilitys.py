@@ -1,3 +1,4 @@
+import os
 from configparser import ConfigParser
 from threading import active_count
 from time import sleep as swait
@@ -6,9 +7,8 @@ from telegram import Api
 from re import search
 from sys import exit
 
-
 THREADS = 400
-LOGO = '''
+LOGO = r'''
 __     ___                     _____    _
 \ \   / (_) _____      _____  |_   _|__| | ___  __ _ _ __ __ _ _ __ ___
  \ \ / /| |/ _ \ \ /\ / / __|   | |/ _ \ |/ _ \/ _` | '__/ _` | '_ ` _ \ _____
@@ -40,7 +40,13 @@ def config_loader():
 
 
 def input_loader():
-    url_input = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', input(' [ INPUT ] Enter Post URL: '))
+    # First try to get URL from environment variable (for Railway)
+    url_string = os.environ.get('POST_URL')
+    if url_string is None:
+        # Fallback to interactive input (for local testing)
+        url_string = input(' [ INPUT ] Enter Post URL: ')
+    
+    url_input = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', url_string)
     if url_input: 
         _, channel, post = url_input.groups()
         return channel, post
@@ -67,5 +73,3 @@ def display():
         ''')
     
     return inner
-
-
