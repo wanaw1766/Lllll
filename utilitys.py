@@ -3,7 +3,7 @@ from configparser import ConfigParser
 from threading import active_count
 from time import sleep as swait
 from os import system, name
-from tg_api import Api   # Changed from telegram import Api
+from telegram import Api   # your local telegram.py
 from re import search
 from sys import exit
 
@@ -40,10 +40,9 @@ def config_loader():
 
 
 def input_loader():
-    # First try to get URL from environment variable (for Railway)
+    # For local testing (if POST_URL env var is set)
     url_string = os.environ.get('POST_URL')
     if url_string is None:
-        # Fallback to interactive input (for local testing)
         url_string = input(' [ INPUT ] Enter Post URL: ')
     
     url_input = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', url_string)
