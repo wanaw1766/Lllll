@@ -1,17 +1,39 @@
 import os
+import sys
 import asyncio
 import random
 from re import search
 
-# Now the real telegram library can be imported without conflict
+# ------------------------------------------------------------
+# HACK: Temporarily remove current directory from sys.path
+# so that 'import telegram' loads the REAL library, not your local telegram.py
+original_path = sys.path.copy()
+# Remove the current directory (where local telegram.py lives)
+sys.path = [p for p in sys.path if p != '' and p != os.getcwd() and not p.endswith('/.')]
+# Now import the real python-telegram-bot library
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
-
-# Your local Api class (from renamed file)
-from tg_views import Api
+# Restore path so that your local modules can be found again
+sys.path = original_path
+# ------------------------------------------------------------
+# Now import your LOCAL telegram.py (the file is still named telegram.py)
+# Because we restored the path, Python will find your local file again.
+# But we need to import Api from it.
+# However, 'from telegram import Api' would try to import from the library again.
+# So we must import your local file using a different method.
+# Let's load it as a separate module.
+import importlib.util
+local_telegram_path = os.path.join(os.path.dirname(__file__), 'telegram.py')
+spec = importlib.util.spec_from_file_location("local_telegram", local_telegram_path)
+local_telegram = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(local_telegram)
+Api = local_telegram.Api
+# ------------------------------------------------------------
+# Your other modules
 from utilitys import config_loader, LOGO
 from auto_proxy import Proxy
 
+# ------------------------------------------------------------
 stop_flag = False
 current_status = {
     'mode': None, 'channel': None, 'post': None,
