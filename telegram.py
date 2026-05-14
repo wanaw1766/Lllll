@@ -63,5 +63,3 @@ class Api():
             
         except AttributeError: Api.token_errors += 1
         except requests.exceptions.RequestException: Api.proxy_errors += 1
-    
-
