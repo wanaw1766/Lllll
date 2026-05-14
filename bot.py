@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Mess
 
 from utilitys import config_loader, LOGO, logger, THREADS
 from auto_proxy import Proxy
-from tg_views import Api   # your renamed file
+from tg_views import Api
 
 # Global state
 stop_flag = False
@@ -24,7 +24,7 @@ chat_id = None
 app_context = None
 
 def progress_bar(current, total, length=20):
-    filled = int(length * current / total)
+    filled = int(length * current / total) if total else 0
     return '█' * filled + '░' * (length - filled)
 
 async def update_progress():
@@ -46,7 +46,7 @@ async def update_progress():
     else:
         try:
             await app_context.bot.edit_message_text(chat_id, progress_msg_id, text, parse_mode='Markdown')
-        except:
+        except Exception:
             pass
 
 def view_updater(api):
@@ -56,7 +56,7 @@ def view_updater(api):
             Api.views(api)
             real_views = Api.real_views
             asyncio.run_coroutine_threadsafe(update_progress(), asyncio.get_event_loop())
-        except:
+        except Exception:
             pass
         swait(5)
 
@@ -68,7 +68,7 @@ def cli():
             print("\n" * 2)
             _display()
             print(f"Sent: {sent_views}/{target_views}")
-        except:
+        except Exception:
             pass
         swait(2)
 
@@ -91,7 +91,7 @@ def start_sender(api, auto_proxies):
         print("No proxies available.")
         return
 
-    # Infinite cycles until target reached
+    print(f"Starting with {len(proxy_list)} proxy entries (will cycle continuously)")
     while not stop_flag and sent_views < target_views:
         threads = []
         for proxy_type, proxy in proxy_list:
@@ -106,11 +106,11 @@ def start_sender(api, auto_proxies):
             t.start()
         for t in threads:
             t.join()
-        # After one full proxy cycle, continue to next cycle if needed
         print(f"Completed one proxy cycle. Total sent: {sent_views}/{target_views}")
+
     print(f"Sender finished. Sent {sent_views} views.")
 
-# ---------- Bot handlers ----------
+# ---------------- Bot handlers ----------------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global chat_id, app_context, progress_msg_id
     chat_id = update.effective_chat.id
@@ -152,7 +152,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             target = int(update.message.text.strip())
             if target <= 0:
                 raise ValueError
-        except:
+        except ValueError:
             await update.message.reply_text("❌ Please send a positive integer.")
             return
 
@@ -166,10 +166,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         post = context.user_data['post']
 
         http, socks4, socks5 = config_loader()
-        auto_proxies = Proxy(http_sources=http, socks4_sources=socks4, socks5_sources=socks5)
-        api = Api(channel=channel, post=post)
+        auto_proxies = Proxy(http, socks4, socks5)
+        api = Api(channel, post)
 
-        await update.message.reply_text(f"🚀 Starting for {channel}/{post}. Target: {target_views} views. Progress bar will appear.")
+        await update.message.reply_text(f"🚀 Starting for {channel}/{post}. Target: {target_views} views.\nProgress bar will appear here.")
         threading.Thread(target=view_updater, args=(api,), daemon=True).start()
         threading.Thread(target=cli, daemon=True).start()
         threading.Thread(target=start_sender, args=(api, auto_proxies), daemon=True).start()
@@ -185,7 +185,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
     print(LOGO)
-    print("🤖 Bot running.")
+    print("🤖 Bot running. Press Ctrl+C to stop.")
     token = os.environ.get("TELEGRAM_BOT_TOKEN")
     if not token:
         raise ValueError("No TELEGRAM_BOT_TOKEN set.")
