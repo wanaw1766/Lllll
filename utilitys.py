@@ -1,14 +1,14 @@
-import os
 from configparser import ConfigParser
 from threading import active_count
 from time import sleep as swait
 from os import system, name
-from tg_views import Api   # changed from telegram to tg_views
+from telegram import Api
 from re import search
 from sys import exit
 
+
 THREADS = 400
-LOGO = r'''
+LOGO = '''
 __     ___                     _____    _
 \ \   / (_) _____      _____  |_   _|__| | ___  __ _ _ __ __ _ _ __ ___
  \ \ / /| |/ _ \ \ /\ / / __|   | |/ _ \ |/ _ \/ _` | '__/ _` | '_ ` _ \ _____
@@ -40,11 +40,7 @@ def config_loader():
 
 
 def input_loader():
-    url_string = os.environ.get('POST_URL')
-    if url_string is None:
-        url_string = input(' [ INPUT ] Enter Post URL: ')
-    
-    url_input = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', url_string)
+    url_input = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', input(' [ INPUT ] Enter Post URL: '))
     if url_input: 
         _, channel, post = url_input.groups()
         return channel, post
