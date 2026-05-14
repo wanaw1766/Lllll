@@ -8,13 +8,13 @@ from time import sleep as swait
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# Your local modules (unchanged except import from tg_views)
+# Your local modules (make sure utilitys imports from tg_views)
 from tg_views import Api
 from utilitys import config_loader, LOGO
 from auto_proxy import Proxy
 
 # -------------------------------------------------------------------
-# Global variables (same as original CLI)
+# Global variables
 stop_flag = False
 current_status = {
     'active': False,
@@ -26,8 +26,7 @@ current_status = {
     'real_views': 0,
 }
 progress_msg_id = None
-view_thread = None
-real_views_thread = None
+loop = None  # will hold the asyncio event loop
 
 # -------------------------------------------------------------------
 def progress_bar(current, total, length=20):
@@ -39,7 +38,7 @@ async def update_progress_message(context, chat_id):
     if not current_status['active']:
         return
     bar = progress_bar(current_status['sent'], current_status['target'])
-    percentage = (current_status['sent'] / current_status['target']) * 100
+    percentage = (current_status['sent'] / current_status['target']) * 100 if current_status['target'] else 0
     text = (
         f"🚀 *{current_status['mode'].upper()} MODE*\n"
         f"📊 Progress:\n`{bar}` {percentage:.1f}%\n"
@@ -59,13 +58,18 @@ async def update_progress_message(context, chat_id):
                 parse_mode='Markdown'
             )
         except Exception:
-            pass
+            pass  # ignore "Message not modified"
+
+def safe_update_progress(context, chat_id):
+    """Thread-safe wrapper to schedule the async progress update."""
+    if loop is not None and loop.is_running():
+        asyncio.run_coroutine_threadsafe(update_progress_message(context, chat_id), loop)
 
 # -------------------------------------------------------------------
-# THE ORIGINAL VIEW SENDER (threaded, exactly as in CLI)
+# Original threaded view sender (identical to CLI)
 def original_view_sender(channel, post, target, mode, chat_id, context):
     global stop_flag, current_status
-    # Load proxies exactly as before
+    # Load config and proxies exactly as original CLI
     http, socks4, socks5 = config_loader()
     auto_proxies = Proxy(http_sources=http, socks4_sources=socks4, socks5_sources=socks5)
     auto_proxies.init()
@@ -73,16 +77,11 @@ def original_view_sender(channel, post, target, mode, chat_id, context):
 
     proxy_list = list(auto_proxies.proxies)
     if not proxy_list:
-        asyncio.run_coroutine_threadsafe(
-            context.bot.send_message(chat_id, "❌ No proxies available. Stopping."),
-            asyncio.get_event_loop()
-        )
-        current_status['active'] = False
+        safe_update_progress(context, chat_id)
         return
 
     views_sent = 0
     if mode == 'direct':
-        # Direct mode: cycle through proxies as fast as possible (original CLI style)
         while views_sent < target and not stop_flag:
             for proxy_type, proxy in proxy_list:
                 if views_sent >= target or stop_flag:
@@ -91,49 +90,30 @@ def original_view_sender(channel, post, target, mode, chat_id, context):
                     api.send_view(proxy, proxy_type)
                     views_sent += 1
                     current_status['sent'] = views_sent
-                    # Update progress every 5 views
                     if views_sent % 5 == 0 or views_sent == target:
-                        asyncio.run_coroutine_threadsafe(
-                            update_progress_message(context, chat_id),
-                            asyncio.get_event_loop()
-                        )
+                        safe_update_progress(context, chat_id)
                 except Exception:
                     continue
-        # Final update
-        asyncio.run_coroutine_threadsafe(
-            update_progress_message(context, chat_id),
-            asyncio.get_event_loop()
-        )
-        asyncio.run_coroutine_threadsafe(
-            context.bot.send_message(chat_id, f"✅ Direct mode finished. Sent {views_sent} / {target} views."),
-            asyncio.get_event_loop()
-        )
+        safe_update_progress(context, chat_id)
 
     elif mode == 'random':
-        # Random mode: send one view, then wait 1‑5 minutes
         while views_sent < target and not stop_flag:
-            proxy_type, proxy = proxy_list[0]  # use first proxy
+            proxy_type, proxy = proxy_list[0]
             try:
                 api.send_view(proxy, proxy_type)
                 views_sent += 1
                 current_status['sent'] = views_sent
-                asyncio.run_coroutine_threadsafe(
-                    update_progress_message(context, chat_id),
-                    asyncio.get_event_loop()
-                )
+                safe_update_progress(context, chat_id)
                 if views_sent < target:
                     wait_seconds = random.randint(60, 300)
                     for _ in range(wait_seconds):
                         if stop_flag:
                             break
-                        swait(1)  # blocking sleep, but this runs in a thread
+                        swait(1)
             except Exception:
                 swait(1)
                 continue
-        asyncio.run_coroutine_threadsafe(
-            context.bot.send_message(chat_id, f"✅ Random mode finished. Sent {views_sent} / {target} views."),
-            asyncio.get_event_loop()
-        )
+        safe_update_progress(context, chat_id)
 
     current_status['active'] = False
 
@@ -143,13 +123,10 @@ def real_views_updater(channel, post, chat_id, context):
         try:
             Api.views(api)
             current_status['real_views'] = Api.real_views
-            asyncio.run_coroutine_threadsafe(
-                update_progress_message(context, chat_id),
-                asyncio.get_event_loop()
-            )
+            safe_update_progress(context, chat_id)
         except Exception:
             pass
-        swait(5)  # update every 5 seconds (blocking, but in thread)
+        swait(5)
 
 # -------------------------------------------------------------------
 # Bot command handlers
@@ -180,7 +157,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data['waiting_for_url'] = True
         context.user_data['mode'] = 'random'
     elif data == "stop":
-        global stop_flag, view_thread, real_views_thread
+        global stop_flag
         stop_flag = True
         await query.edit_message_text("🛑 Stopping...")
     elif data == "status":
@@ -201,7 +178,7 @@ async def send_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(msg, parse_mode="Markdown")
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    global progress_msg_id, view_thread, real_views_thread, stop_flag, current_status
+    global progress_msg_id, stop_flag, current_status, loop
     if context.user_data.get('waiting_for_url'):
         url = update.message.text
         match = search(r'(https?:\/\/t\.me\/)?([^/]+)/(\d+)', url)
@@ -244,26 +221,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'real_views': 0,
         }
 
+        # Store the event loop for thread-safe updates
+        loop = asyncio.get_running_loop()
+
         await update.message.reply_text(
             f"🚀 Starting {mode} mode for `{channel}/{post}`.\n"
             f"Target views: **{target}**.\n"
             f"Progress will be shown in real time.\nUse /stop to cancel."
         )
 
-        # Start original threaded view sender and real‑views updater
         chat_id = update.effective_chat.id
+        # Start threads (daemon so they exit when bot stops)
         view_thread = threading.Thread(
             target=original_view_sender,
             args=(channel, post, target, mode, chat_id, context),
             daemon=True
         )
-        real_views_thread = threading.Thread(
+        views_thread = threading.Thread(
             target=real_views_updater,
             args=(channel, post, chat_id, context),
             daemon=True
         )
         view_thread.start()
-        real_views_thread.start()
+        views_thread.start()
 
 async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global stop_flag
