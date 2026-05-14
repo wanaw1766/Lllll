@@ -22,7 +22,7 @@ class Proxy:
         for source_url in [s for s in sources if s]:
             try:
                 response = requests.get(
-                    source_url, timeout=15, 
+                    source_url, timeout=15,
                     headers={'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/106.0.0.0 Safari/537.36'}
                 )
             except Exception as e:
@@ -46,7 +46,7 @@ class Proxy:
         for t in threads:
             t.join()
         
-        # Force at least THREADS entries (reuse the list)
+        # Force at least THREADS entries by repeating the list
         from utilitys import THREADS
         if len(self.proxies) < THREADS:
             multiplier = (THREADS // len(self.proxies)) + 1
