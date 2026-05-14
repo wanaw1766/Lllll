@@ -77,6 +77,7 @@ def cli():
             pass
         swait(2)
 
+# ---------- FIXED: stops immediately at target, no overshoot ----------
 def send_view_with_count(api, proxy, proxy_type):
     global sent_views, stop_flag, target_views, lock
     with lock:
@@ -90,6 +91,7 @@ def send_view_with_count(api, proxy, proxy_type):
         if sent_views % 10 == 0 or sent_views == target_views:
             safe_update_progress()
 
+# ---------- FIXED: infinite cycling until target reached ----------
 def start_sender(api, auto_proxies):
     global sent_views, stop_flag, target_views
     auto_proxies.init()
@@ -99,8 +101,8 @@ def start_sender(api, auto_proxies):
         return
 
     print(f"Starting with {len(proxy_list)} proxy entries (will cycle continuously)")
+    # Loop forever until target reached or stop flag set
     while not stop_flag and sent_views < target_views:
-        threads = []
         for proxy_type, proxy in proxy_list:
             if stop_flag or sent_views >= target_views:
                 break
@@ -111,14 +113,13 @@ def start_sender(api, auto_proxies):
             if stop_flag or sent_views >= target_views:
                 break
             t = threading.Thread(target=send_view_with_count, args=(api, proxy, proxy_type), daemon=True)
-            threads.append(t)
             t.start()
-        for t in threads:
-            t.join()
+        # After finishing one cycle, continue to the next cycle
         print(f"Completed one proxy cycle. Total sent: {sent_views}/{target_views}")
     print(f"Sender finished. Sent {sent_views} views.")
 
-# ---------------- Bot handlers ----------------
+# ------------------------------
+# Telegram bot handlers (unchanged)
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global chat_id, app_context, progress_msg_id, main_loop
     chat_id = update.effective_chat.id
