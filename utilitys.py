@@ -3,7 +3,7 @@ from configparser import ConfigParser
 from threading import active_count
 from time import sleep as swait
 from os import system, name
-from telegram import Api   # your local telegram.py
+from tg_views import Api   # changed from telegram to tg_views
 from re import search
 from sys import exit
 
@@ -40,7 +40,6 @@ def config_loader():
 
 
 def input_loader():
-    # For local testing (if POST_URL env var is set)
     url_string = os.environ.get('POST_URL')
     if url_string is None:
         url_string = input(' [ INPUT ] Enter Post URL: ')
