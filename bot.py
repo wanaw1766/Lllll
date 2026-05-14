@@ -7,38 +7,34 @@ from re import search
 from threading import active_count
 from time import sleep as swait
 
-# ------------------------------------------------------------
-# 1. Import the REAL telegram library (python-telegram-bot)
-#    temporarily remove current directory to avoid your local telegram.py
+# ---------- Import the REAL telegram library (python-telegram-bot) ----------
+# Temporarily remove current directory to avoid conflict with your local telegram.py
 original_path = sys.path.copy()
 sys.path = [p for p in sys.path if p != '' and p != os.getcwd() and not p.endswith('/.')]
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 sys.path = original_path
-# ------------------------------------------------------------
+# --------------------------------------------------------------------------
 
-# 2. Import your LOCAL telegram.py as a separate module (so it doesn't conflict)
-#    this gives us the Api class
+# ---------- Import your LOCAL telegram.py as a separate module ----------
 local_telegram_path = os.path.join(os.path.dirname(__file__), 'telegram.py')
 spec = importlib.util.spec_from_file_location("local_telegram", local_telegram_path)
 local_telegram = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(local_telegram)
 Api = local_telegram.Api
 
-# 3. Import other local modules (they use the local telegram.py, which is fine)
+# ---------- Import other local modules ----------
 from utilitys import config_loader, LOGO, logger, THREADS
 from auto_proxy import Proxy
 
-# ------------------------------------------------------------
-# Global state for the view sender
+# ---------- Global state ----------
 stop_flag = False
 target_views = 0
 sent_views = 0
 real_views = 0
 lock = threading.Lock()
 
-# ------------------------------------------------------------
-# Original view updater (gets real views from Telegram)
+# ---------- Original view updater (gets real views) ----------
 def view_updater(api):
     global real_views, stop_flag
     while not stop_flag:
@@ -49,7 +45,7 @@ def view_updater(api):
             logger(e)
         swait(2)
 
-# Original CLI display (prints to console logs – visible on Railway)
+# ---------- Original CLI display (prints to Railway logs) ----------
 def cli():
     from utilitys import display
     _display = display()
@@ -62,7 +58,7 @@ def cli():
             logger(e)
         swait(2)
 
-# Send view with counting (used by each thread)
+# ---------- Send view with counting (used by each thread) ----------
 def send_view_with_count(api, proxy, proxy_type):
     global sent_views, stop_flag, target_views, lock
     with lock:
@@ -72,7 +68,7 @@ def send_view_with_count(api, proxy, proxy_type):
     with lock:
         sent_views += 1
 
-# Original thread‑per‑proxy start logic with target limit
+# ---------- Original thread‑per‑proxy start logic with target limit ----------
 def start(api, auto_proxies, chat_id, context):
     global sent_views, stop_flag, target_views, lock
     auto_proxies.init()
@@ -101,7 +97,7 @@ def start(api, auto_proxies, chat_id, context):
         t.join()
 
     print(f"View sender finished. Sent {sent_views}/{target_views} views.")
-    # Send final message to Telegram (async safe)
+    # Send final message to Telegram if chat_id and context are provided
     if chat_id and context:
         import asyncio
         asyncio.run_coroutine_threadsafe(
@@ -109,8 +105,7 @@ def start(api, auto_proxies, chat_id, context):
             asyncio.get_event_loop()
         )
 
-# ------------------------------------------------------------
-# Telegram bot handlers
+# ---------- Telegram bot handlers ----------
 async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton("🎯 Start Viewing", callback_data="start_view")],
@@ -195,7 +190,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Cancelled.")
 
-# ------------------------------------------------------------
+# ---------- Main ----------
 def main():
     print(LOGO)
     print("🤖 Bot is running. Press Ctrl+C to stop.")
