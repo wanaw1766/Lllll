@@ -3,14 +3,14 @@ import asyncio
 import random
 from re import search
 
-# Import the python-telegram-bot library with an alias (so it doesn't conflict with your local telegram.py)
-import telegram as tg
+# Now the real telegram library can be imported without conflict
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
 
-# Your local modules (telegram.py stays as is)
+# Your local Api class (from renamed file)
+from tg_views import Api
 from utilitys import config_loader, LOGO
 from auto_proxy import Proxy
-from telegram import Api   # this is YOUR telegram.py, not the library
 
 stop_flag = False
 current_status = {
@@ -45,20 +45,20 @@ async def update_progress_message(context, chat_id, sent, target, real_views, mo
             parse_mode='Markdown'
         )
 
-async def start(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
-        [tg.InlineKeyboardButton("🎯 Direct View", callback_data="direct")],
-        [tg.InlineKeyboardButton("⏱️ Random Mode", callback_data="random")],
-        [tg.InlineKeyboardButton("🛑 Stop", callback_data="stop")],
-        [tg.InlineKeyboardButton("📊 Status", callback_data="status")]
+        [InlineKeyboardButton("🎯 Direct View", callback_data="direct")],
+        [InlineKeyboardButton("⏱️ Random Mode", callback_data="random")],
+        [InlineKeyboardButton("🛑 Stop", callback_data="stop")],
+        [InlineKeyboardButton("📊 Status", callback_data="status")]
     ]
     await update.message.reply_text(
         "📢 *Telegram Auto Views Bot*\nChoose an option:",
-        reply_markup=tg.InlineKeyboardMarkup(keyboard),
+        reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown"
     )
 
-async def button_handler(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -78,7 +78,7 @@ async def button_handler(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
     elif data == "status":
         await send_status(update, context)
 
-async def send_status(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def send_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if current_status['active']:
         msg = (
             f"📊 *Status*\n"
@@ -92,7 +92,7 @@ async def send_status(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
         msg = "No active view task. Use /start to begin."
     await update.message.reply_text(msg, parse_mode="Markdown")
 
-async def handle_message(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global progress_msg_id
     if context.user_data.get('waiting_for_url'):
         url = update.message.text
@@ -136,7 +136,7 @@ async def handle_message(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
         asyncio.create_task(run_viewer(update, context, channel, post, target, mode))
         asyncio.create_task(update_real_views(update, context, channel, post))
 
-async def update_real_views(update: tg.Update, context: ContextTypes.DEFAULT_TYPE, channel, post):
+async def update_real_views(update: Update, context: ContextTypes.DEFAULT_TYPE, channel, post):
     api = Api(channel=channel, post=post)
     while current_status['active'] and not stop_flag:
         try:
@@ -151,7 +151,7 @@ async def update_real_views(update: tg.Update, context: ContextTypes.DEFAULT_TYP
             pass
         await asyncio.sleep(3)
 
-async def run_viewer(update: tg.Update, context: ContextTypes.DEFAULT_TYPE, channel, post, target, mode):
+async def run_viewer(update: Update, context: ContextTypes.DEFAULT_TYPE, channel, post, target, mode):
     global stop_flag, current_status
     stop_flag = False
     current_status = {
@@ -208,16 +208,16 @@ async def run_viewer(update: tg.Update, context: ContextTypes.DEFAULT_TYPE, chan
 
     current_status['active'] = False
 
-async def stop(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global stop_flag
     stop_flag = True
     await update.message.reply_text("🛑 Stopping view tasks...")
 
-async def cancel(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Cancelled.")
 
-async def status(update: tg.Update, context: ContextTypes.DEFAULT_TYPE):
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_status(update, context)
 
 def main():
